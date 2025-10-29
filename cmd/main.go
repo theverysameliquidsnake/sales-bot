@@ -5,6 +5,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/theverysameliquidsnake/sales-bot/internal/configs"
+	"github.com/theverysameliquidsnake/sales-bot/internal/handlers"
 )
 
 func init() {
@@ -23,4 +24,6 @@ func main() {
 	if err := configs.RequestIgdbToken(); err != nil {
 		log.Fatal(err)
 	}
+
+	handlers.RunScheduledNotifications()
 }
