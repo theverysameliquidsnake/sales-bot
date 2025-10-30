@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/mymmrac/telego"
+	"github.com/mymmrac/telego/telegohandler"
+	"github.com/mymmrac/telego/telegoutil"
 	"github.com/theverysameliquidsnake/sales-bot/internal/models"
 	"github.com/theverysameliquidsnake/sales-bot/internal/models/igdb"
 	"github.com/theverysameliquidsnake/sales-bot/internal/models/steam"
@@ -14,7 +17,7 @@ import (
 	"github.com/theverysameliquidsnake/sales-bot/internal/types"
 )
 
-func RunScheduledNotifications() error {
+func RunScheduledNotifications(ctx *telegohandler.Context, update telego.Update) error {
 	if err := runCleanup(); err != nil {
 		return errors.Join(errors.New("handler: could not clean mongo db:"), err)
 	}
@@ -30,9 +33,21 @@ func RunScheduledNotifications() error {
 			return errors.Join(fmt.Errorf("handler: could not handle profile: %s", settings.BackloggdProfile), err)
 		}
 
-		// TO DO
-		// send notification to telegram
-		fmt.Println(sales)
+		if len(sales) > 0 {
+			var fullMessage string
+			for _, sale := range sales {
+				message := fmt.Sprintf("<a href=\"%s\"><b>%s</b></a>\n%s %s <s>%s</s>\n", sale.Url, sale.Name, sale.Discount, sale.FinalPrice, sale.InitialPrice)
+				fullMessage = fullMessage + message
+			}
+
+			if _, err := ctx.Bot().SendMessage(ctx, &telego.SendMessageParams{
+				ChatID:    telegoutil.ID(settings.UserId),
+				ParseMode: "HTML",
+				Text:      fullMessage,
+			}); err != nil {
+				return errors.Join(errors.New("handler: could not send message:"), err)
+			}
+		}
 	}
 
 	return nil
