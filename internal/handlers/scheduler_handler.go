@@ -15,166 +15,27 @@ import (
 )
 
 func RunScheduledNotifications() error {
-	// Parse user profiles in database and create wishlists
+	if err := runCleanup(); err != nil {
+		return errors.Join(errors.New("handler: could not clean mongo db:"), err)
+	}
+
 	userSettings, err := repos.GetUserSettings()
 	if err != nil {
 		return errors.Join(errors.New("handler: could not get all user settings from mongo db:"), err)
 	}
 
-	userSettingsMap := convertUserSettingsToMap(userSettings)
-
-	// End if no user setting provided
-	if len(userSettingsMap) == 0 {
-		return nil
-	}
-
-	var wishlists []models.Wishlist
-	for _, setting := range userSettingsMap {
-		if isUserSettingsValid(setting) {
-			slugs, err := parsers.ParseBackloggdWishlist(setting.BackloggdProfile)
-			if err != nil {
-				return errors.Join(fmt.Errorf("handler: could not parse profile: %s", setting.BackloggdProfile), err)
-			}
-
-			if len(slugs) == 0 {
-				continue
-			}
-
-			wishlist := models.Wishlist{
-				UserId:   setting.UserId,
-				SlugList: slugs,
-			}
-			wishlists = append(wishlists, wishlist)
-		}
-	}
-
-	// End if no wishlists to insert
-	if len(wishlists) == 0 {
-		return nil
-	}
-
-	if err = repos.InsertWishlists(wishlists); err != nil {
-		return errors.Join(errors.New("handler: could not insert wishlists:"), err)
-	}
-
-	for _, wishlist := range wishlists {
-		// Get data from IGDB for games in wishlists
-		existingGames, err := repos.GetIgdbGames(wishlist.SlugList)
+	for _, settings := range userSettings {
+		sales, err := processWishlist(settings)
 		if err != nil {
-			return errors.Join(fmt.Errorf("handler: could not check for existing igdb records: %d", wishlist.UserId), err)
+			return errors.Join(fmt.Errorf("handler: could not handle profile: %s", settings.BackloggdProfile), err)
 		}
 
-		// Add missing games if any
-		slugsToRequest := getMissingSlugs(wishlist.SlugList, existingGames)
-		if len(slugsToRequest) > 0 {
-			games, err := requests.RequestGamesFromIgdb(slugsToRequest)
-			if err != nil {
-				return errors.Join(fmt.Errorf("handler: could not get games from igdb: %d", wishlist.UserId), err)
-			}
-
-			if err = repos.InsertIgdbGames(games); err != nil {
-				return errors.Join(fmt.Errorf("handler: could not insert games from igdb: %d", wishlist.UserId), err)
-			}
-		}
-
-		// Get data from Steam for linked IGDB games
-		games, err := repos.GetIgdbGames(wishlist.SlugList)
-		if err != nil {
-			return errors.Join(fmt.Errorf("handler: could not get igdb games from mongo db: %d", wishlist.UserId), err)
-		}
-
-		var steamAppIds []uint64
-		for _, game := range games {
-			for _, externalGame := range game.ExternalGames {
-				if externalGame.ExternalGameSource.Name == "Steam" {
-					steamAppId, err := strconv.ParseUint(externalGame.Uid, 10, 64)
-					if err != nil {
-						return errors.Join(fmt.Errorf("handler: could not parse external game uid to uint: %s", externalGame.Uid), err)
-					}
-
-					steamAppIds = append(steamAppIds, steamAppId)
-				}
-			}
-		}
-
-		// Add missing apps if any
-		if len(steamAppIds) > 0 {
-			existingSteamAppsDetails, err := repos.GetSteamAppsDetails(steamAppIds)
-			if err != nil {
-				return errors.Join(errors.New("handler: could not check for existing steam record:"), err)
-			}
-
-			idsToRequest, err := getMissingSteamAppsIds(steamAppIds, existingSteamAppsDetails)
-			if err != nil {
-				return errors.Join(errors.New("handler: could not get missing steam apps ids difference:"), err)
-			}
-
-			if len(idsToRequest) > 0 {
-				appsDetails, err := requests.RequestAppDetailsFromSteam(idsToRequest, userSettingsMap[wishlist.UserId].CountryCode)
-				if err != nil {
-					return errors.Join(errors.New("handler: could not get apps details from steam:"), err)
-				}
-
-				if err = repos.InsertSteamAppsDetails(appsDetails); err != nil {
-					return errors.Join(errors.New("handler: could not insert apps details from steam:"), err)
-				}
-			}
-
-			appsDetails, err := repos.GetSteamAppsDetails(steamAppIds)
-			if err != nil {
-				return errors.Join(fmt.Errorf("handler: could not get app details from mongo db: %d", wishlist.UserId), err)
-			}
-
-			// Currently only Steam
-			var sales []models.Sale
-			for _, appDetails := range appsDetails {
-				if appDetails.PriceOverview.DiscountPercent > 0 {
-					sale := models.Sale{
-						Name:         appDetails.Name,
-						Url:          fmt.Sprintf("https://store.steampowered.com/app/%d/", appDetails.SteamAppId),
-						Discount:     fmt.Sprintf("-%d%%", appDetails.PriceOverview.DiscountPercent),
-						InitialPrice: appDetails.PriceOverview.InitialFormatted,
-						FinalPrice:   appDetails.PriceOverview.FinalFormatted,
-					}
-
-					sales = append(sales, sale)
-				}
-			}
-
-			// Send notifications
-			if len(sales) > 0 {
-				fmt.Println(sales)
-			}
-		}
-	}
-
-	// Clean up
-	if err = repos.DropWishlists(); err != nil {
-		return errors.Join(errors.New("handler: could not drop wishlists:"), err)
-	}
-
-	if err = repos.DropIgdbGames(); err != nil {
-		return errors.Join(errors.New("handler: could not drop igdb games:"), err)
-	}
-
-	if err = repos.DropSteamAppsDetails(); err != nil {
-		return errors.Join(errors.New("handler: could not drop steam apps details:"), err)
+		// TO DO
+		// send notification to telegram
+		fmt.Println(sales)
 	}
 
 	return nil
-}
-
-func isUserSettingsValid(userSettings models.UserSettings) bool {
-	return len(userSettings.BackloggdProfile) > 0 && len(userSettings.CountryCode) > 0 && len(userSettings.CurrencyCode) > 0
-}
-
-func convertUserSettingsToMap(userSettingsList []models.UserSettings) map[int64]models.UserSettings {
-	userSettingsMap := make(map[int64]models.UserSettings)
-	for _, userSettings := range userSettingsList {
-		userSettingsMap[userSettings.UserId] = userSettings
-	}
-
-	return userSettingsMap
 }
 
 func getMissingSlugs(wishlistSlugs []string, existingGames []igdb.Game) []string {
@@ -215,4 +76,153 @@ func getMissingSteamAppsIds(parsedSteamAppsIds []uint64, existingSteamAppsDetail
 	}
 
 	return idsToRequest, nil
+}
+
+func runCleanup() error {
+	if err := repos.DropWishlists(); err != nil {
+		return errors.Join(errors.New("could not drop wishlists:"), err)
+	}
+
+	if err := repos.DropIgdbGames(); err != nil {
+		return errors.Join(errors.New("could not drop igdb games:"), err)
+	}
+
+	if err := repos.DropSteamAppsDetails(); err != nil {
+		return errors.Join(errors.New("could not drop steam apps details:"), err)
+	}
+
+	return nil
+}
+
+func obtainIgdbGames(slugs []string) ([]igdb.Game, error) {
+	existingGames, err := repos.GetIgdbGames(slugs)
+	if err != nil {
+		return nil, errors.Join(errors.New("could not check for existing igdb records:"), err)
+	}
+
+	// Add missing games if any
+	slugsToRequest := getMissingSlugs(slugs, existingGames)
+	if len(slugsToRequest) > 0 {
+		games, err := requests.RequestGamesFromIgdb(slugsToRequest)
+		if err != nil {
+			return nil, errors.Join(errors.New("could not get games from igdb:"), err)
+		}
+
+		if err = repos.InsertIgdbGames(games); err != nil {
+			return nil, errors.Join(errors.New("could not insert games from igdb:"), err)
+		}
+	}
+
+	games, err := repos.GetIgdbGames(slugs)
+	if err != nil {
+		return nil, errors.Join(errors.New("could not get igdb games from mongo db:"), err)
+	}
+
+	return games, nil
+}
+
+func extractSteamAppsIdsFromExternalIgdbGames(igdbGames []igdb.Game) ([]uint64, error) {
+	var steamAppsIds []uint64
+	for _, igdbGame := range igdbGames {
+		for _, externalGame := range igdbGame.ExternalGames {
+			if externalGame.ExternalGameSource.Name == "Steam" {
+				steamAppId, err := strconv.ParseUint(externalGame.Uid, 10, 64)
+				if err != nil {
+					return nil, errors.Join(fmt.Errorf("could not parse external game uid to uint: %s", externalGame.Uid), err)
+				}
+
+				steamAppsIds = append(steamAppsIds, steamAppId)
+			}
+		}
+	}
+
+	return steamAppsIds, nil
+}
+
+func obtainSteamAppsDetails(steamAppsIds []uint64, userSettings models.UserSettings) ([]steam.AppDetails, error) {
+	existingSteamAppsDetails, err := repos.GetSteamAppsDetails(steamAppsIds)
+	if err != nil {
+		return nil, errors.Join(errors.New("could not check for existing steam record:"), err)
+	}
+
+	// Add missing apps details if any
+	idsToRequest, err := getMissingSteamAppsIds(steamAppsIds, existingSteamAppsDetails)
+	if err != nil {
+		return nil, errors.Join(errors.New("could not get missing steam apps ids difference:"), err)
+	}
+
+	if len(idsToRequest) > 0 {
+		appsDetails, err := requests.RequestAppDetailsFromSteam(idsToRequest, userSettings.CountryCode)
+		if err != nil {
+			return nil, errors.Join(errors.New("could not get apps details from steam:"), err)
+		}
+
+		if err = repos.InsertSteamAppsDetails(appsDetails); err != nil {
+			return nil, errors.Join(errors.New("could not insert apps details from steam:"), err)
+		}
+	}
+
+	appsDetails, err := repos.GetSteamAppsDetails(steamAppsIds)
+	if err != nil {
+		return nil, errors.Join(errors.New("could not get app details from mongo db:"), err)
+	}
+
+	return appsDetails, nil
+}
+
+func processWishlist(userSettings models.UserSettings) ([]models.Sale, error) {
+	slugs, err := parsers.ParseBackloggdWishlist(userSettings.BackloggdProfile)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("could not parse profile: %s", userSettings.BackloggdProfile), err)
+	}
+
+	if len(slugs) == 0 {
+		return []models.Sale{}, nil
+	}
+
+	wishlist := models.Wishlist{
+		UserId:   userSettings.UserId,
+		SlugList: slugs,
+	}
+
+	if err = repos.InsertWishlists([]models.Wishlist{wishlist}); err != nil {
+		return nil, errors.Join(fmt.Errorf("could not insert wishlists: %s", userSettings.BackloggdProfile), err)
+	}
+
+	igdbGames, err := obtainIgdbGames(slugs)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("could not obtain igdb games: %s", userSettings.BackloggdProfile), err)
+	}
+
+	// Only Steam for now
+	steamAppsIds, err := extractSteamAppsIdsFromExternalIgdbGames(igdbGames)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("could not extract steam apps ids from igdb games: %s", userSettings.BackloggdProfile), err)
+	}
+
+	if len(steamAppsIds) == 0 {
+		return []models.Sale{}, nil
+	}
+
+	steamAppsDetails, err := obtainSteamAppsDetails(steamAppsIds, userSettings)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("could not obtain steam apps details: %s", userSettings.BackloggdProfile), err)
+	}
+
+	var steamSales []models.Sale
+	for _, steamAppDetails := range steamAppsDetails {
+		if steamAppDetails.PriceOverview.DiscountPercent > 0 {
+			steamSale := models.Sale{
+				Name:         steamAppDetails.Name,
+				Url:          fmt.Sprintf("https://store.steampowered.com/app/%d/", steamAppDetails.SteamAppId),
+				Discount:     fmt.Sprintf("-%d%%", steamAppDetails.PriceOverview.DiscountPercent),
+				InitialPrice: steamAppDetails.PriceOverview.InitialFormatted,
+				FinalPrice:   steamAppDetails.PriceOverview.FinalFormatted,
+			}
+
+			steamSales = append(steamSales, steamSale)
+		}
+	}
+
+	return steamSales, nil
 }
