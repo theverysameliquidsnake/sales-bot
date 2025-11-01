@@ -1,15 +1,23 @@
 <html>
     <head>
+        <script src="https://telegram.org/js/telegram-web-app.js?59"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     </head>
     <body>
-        <div style="padding: 25px;">
+        <div x-data="" style="padding: 20px;">
             <h1>Settings</h1>
             <label for="profile">Profile link</label>
             <input id="profile" type="text" placeholder="https://bckl.gg/o2WS">
             <label for="country">Country</label>
             <select id="country"></select>
+            <span x-text="window.Telegram.WebApp.initData"></span>
+            <button x-on:click="edit();">Edit</button>
+            <script>
+                function edit() {
+                    console.log(window.Telegram.WebApp.initData);
+                }
+            </script>
         </div>  
     </body>
 </html>
