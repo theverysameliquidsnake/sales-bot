@@ -36,7 +36,7 @@ func RunScheduledNotifications(ctx *telegohandler.Context, update telego.Update)
 		if len(sales) > 0 {
 			var fullMessage string
 			for _, sale := range sales {
-				message := fmt.Sprintf("<a href=\"%s\"><b>%s</b></a>\n%s %s <s>%s</s>\n", sale.Url, sale.Name, sale.Discount, sale.FinalPrice, sale.InitialPrice)
+				message := fmt.Sprintf("<a href=\"%s\"><b>%s</b></a>\n%s %s <s>%s</s>\n", sale.Url, sale.Name, sale.FinalPrice, sale.Discount, sale.InitialPrice)
 				fullMessage = fullMessage + message
 			}
 
