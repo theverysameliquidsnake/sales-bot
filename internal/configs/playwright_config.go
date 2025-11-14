@@ -25,7 +25,7 @@ func StartPlaywright() error {
 
 	engine = pw
 
-	br, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{Headless: playwright.Bool(false)})
+	br, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{Headless: playwright.Bool(true)})
 	if err != nil {
 		return fmt.Errorf("config: could not run browser: %w", err)
 	}
