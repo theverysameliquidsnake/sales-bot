@@ -5,18 +5,11 @@ import (
 	"log"
 	"os"
 
-	"github.com/joho/godotenv"
 	"github.com/mymmrac/telego"
 	"github.com/mymmrac/telego/telegohandler"
 	"github.com/theverysameliquidsnake/sales-bot/internal/configs"
 	"github.com/theverysameliquidsnake/sales-bot/internal/handlers"
 )
-
-func init() {
-	if err := godotenv.Load(); err != nil {
-		log.Fatal(err)
-	}
-}
 
 func main() {
 	// Postres
