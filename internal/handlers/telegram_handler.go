@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
+	"log"
 	"strings"
 
 	"github.com/mymmrac/telego"
@@ -13,7 +15,9 @@ import (
 func StartHandler(ctx *telegohandler.Context, update telego.Update) error {
 	message := "Not so fast, boss. First, send me a link to your Backloggd profile using the /profile <url> command, both short and long ones are acceptable. Then tell me the country you have your Steam account registered in using the /country <country code> command so I could display the right currency."
 	if err := sendMessage(ctx, update, message); err != nil {
-		return errors.Join(errors.New("handler: could not handle /start command:"), err)
+		errStack := fmt.Errorf("handler: could not handle /start command: %w", err)
+		log.Println(errStack)
+		return errStack
 	}
 
 	return nil
@@ -23,7 +27,9 @@ func ProfileHandler(ctx *telegohandler.Context, update telego.Update) error {
 	if len(strings.Split(strings.TrimSpace(update.Message.Text), " ")) < 2 {
 		message := "Boss, send me a link to your Backloggd profile using the /profile <url> command."
 		if err := sendMessage(ctx, update, message); err != nil {
-			return errors.Join(errors.New("handler: could not handle /profile command: not enough arguments:"), err)
+			errStack := fmt.Errorf("handler: could not handle /profile command: not enough arguments: %w", err)
+			log.Println(errStack)
+			return errStack
 		}
 
 		return nil
@@ -33,7 +39,9 @@ func ProfileHandler(ctx *telegohandler.Context, update telego.Update) error {
 	if !isBackloggdLink(profileLink) {
 		message := "Cannot confirm this is a Backloggd link. Try another one, boss."
 		if err := sendMessage(ctx, update, message); err != nil {
-			return errors.Join(errors.New("handler: could not handle /profile command: not a Backloggd link:"), err)
+			errStack := fmt.Errorf("handler: could not handle /profile command: not a Backloggd link: %w", err)
+			log.Println(errStack)
+			return errStack
 		}
 
 		return nil
@@ -42,13 +50,21 @@ func ProfileHandler(ctx *telegohandler.Context, update telego.Update) error {
 	if err := repos.UpsertBackloggdProfileSetting(update.Message.Chat.ID, profileLink); err != nil {
 		message := "Couldn't update your profile link for some reason. Try again later, boss."
 		if err := sendMessage(ctx, update, message); err != nil {
-			return errors.Join(errors.New("handler: could not handle /profile command: could not upsert link:"), err)
+			errStack := fmt.Errorf("handler: could not handle /profile command: could not upsert link: %w", err)
+			log.Println(errStack)
+			return errStack
 		}
+
+		errStack := fmt.Errorf("handler: could not handle /profile command: could not upsert link: %w", err)
+		log.Println(errStack)
+		return errStack
 	}
 
 	message := "Got your link updated, boss."
 	if err := sendMessage(ctx, update, message); err != nil {
-		return errors.Join(errors.New("handler: could not handle /profile command: send confirmation message:"), err)
+		errStack := fmt.Errorf("handler: could not handle /profile command: send confirmation message: %w", err)
+		log.Println(errStack)
+		return errStack
 	}
 
 	return nil
@@ -85,7 +101,6 @@ func CountryHandler(ctx *telegohandler.Context, update telego.Update) error {
 	return nil
 }
 
-// Debug command
 func RefreshHandler(ctx *telegohandler.Context, update telego.Update) error {
 	if err := RunScheduledNotifications(ctx, update); err != nil {
 		return errors.Join(errors.New("handler: could not handle /refresh command:"), err)

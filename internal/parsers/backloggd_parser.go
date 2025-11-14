@@ -8,8 +8,110 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/playwright-community/playwright-go"
+	"github.com/theverysameliquidsnake/sales-bot/internal/configs"
 	"github.com/theverysameliquidsnake/sales-bot/internal/types"
 )
+
+func ParseBackloggdWishlistPlaywright(profileUrl string) ([]string, error) {
+	browser := configs.GetBrowser()
+
+	userAgent := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.121 Safari/537.36') Chrome/85.0.4183.121 Safari/537.36"
+	page, err := browser.NewPage(playwright.BrowserNewPageOptions{UserAgent: &userAgent})
+	if err != nil {
+		return nil, fmt.Errorf("parser: could not create new browser page: %w", err)
+	}
+	defer page.Close()
+
+	if _, err = page.Goto(profileUrl, playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateNetworkidle}); err != nil {
+		return nil, fmt.Errorf("parser: could not go to profile url: %w", err)
+	}
+
+	gamesUrl, err := page.Locator("a[href^='/u/'][href$='/games/']").First().GetAttribute("href")
+	if err != nil {
+		return nil, fmt.Errorf("parser: could not find games url: %w", err)
+	}
+
+	gamesUrl, err = resolvePartialUrl(gamesUrl)
+	if err != nil {
+		return nil, fmt.Errorf("parser: could not resolve partial url: %w", err)
+	}
+
+	if _, err = page.Goto(gamesUrl, playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateNetworkidle}); err != nil {
+		return nil, fmt.Errorf("parser: could not go to games url: %w", err)
+	}
+
+	wishlistUrl, err := page.Locator("a[href^='/u/'][href$='/type:wishlist/']").First().GetAttribute("href")
+	if err != nil {
+		return nil, fmt.Errorf("parser: could not find wishlist url: %w", err)
+	}
+
+	wishlistUrl, err = resolvePartialUrl(wishlistUrl)
+	if err != nil {
+		return nil, fmt.Errorf("parser: could not resolve partial url: %w", err)
+	}
+
+	if _, err = page.Goto(wishlistUrl, playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateNetworkidle}); err != nil {
+		return nil, fmt.Errorf("parser: could not go to games url: %w", err)
+	}
+
+	slugs := types.NewSet()
+	entries, err := page.Locator("div[id='game-lists'] a[href^='/games/']").All()
+	if err != nil {
+		return nil, fmt.Errorf("parser: could not find games on page: %w", err)
+	}
+
+	for _, entry := range entries {
+		entryUrl, err := entry.GetAttribute("href")
+		if err != nil {
+			return nil, fmt.Errorf("parser: could not get entry url: %w", err)
+		}
+
+		slugs.Add(strings.Split(entryUrl, "/")[2])
+	}
+
+	pagesUrl := types.NewSet()
+	entries, err = page.Locator("nav[aria-label='Pages'] > a[href^='/page=']").All()
+	if err != nil {
+		return nil, fmt.Errorf("parser: could not find pages urls on page: %w", err)
+	}
+
+	for _, entry := range entries {
+		entryUrl, err := entry.GetAttribute("href")
+		if err != nil {
+			return nil, fmt.Errorf("parser: could not get next pages url: %w", err)
+		}
+
+		pagesUrl.Add(entryUrl)
+	}
+
+	for _, pageUrl := range pagesUrl.Values() {
+		newPageUrl, err := resolvePartialUrl(pageUrl)
+		if err != nil {
+			return nil, fmt.Errorf("parser: could not resolve partial url: %w", err)
+		}
+
+		if _, err = page.Goto(newPageUrl, playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateNetworkidle}); err != nil {
+			return nil, fmt.Errorf("parser: could not go to next pages url: %w", err)
+		}
+
+		entries, err := page.Locator("div[id='game-lists'] a[href^='/games/']").All()
+		if err != nil {
+			return nil, fmt.Errorf("parser: could not find games on page: %w", err)
+		}
+
+		for _, entry := range entries {
+			entryUrl, err := entry.GetAttribute("href")
+			if err != nil {
+				return nil, fmt.Errorf("parser: could not get entry url: %w", err)
+			}
+
+			slugs.Add(strings.Split(entryUrl, "/")[2])
+		}
+	}
+
+	return slugs.Values(), nil
+}
 
 func ParseBackloggdWishlist(profileUrl string) ([]string, error) {
 	// Obtain wishlist link

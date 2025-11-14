@@ -8,6 +8,7 @@ import (
 	"github.com/mymmrac/telego"
 	"github.com/mymmrac/telego/telegohandler"
 	"github.com/mymmrac/telego/telegoutil"
+	"github.com/theverysameliquidsnake/sales-bot/internal/configs"
 	"github.com/theverysameliquidsnake/sales-bot/internal/models"
 	"github.com/theverysameliquidsnake/sales-bot/internal/models/igdb"
 	"github.com/theverysameliquidsnake/sales-bot/internal/models/steam"
@@ -18,8 +19,8 @@ import (
 )
 
 func RunScheduledNotifications(ctx *telegohandler.Context, update telego.Update) error {
-	if err := runCleanup(); err != nil {
-		return errors.Join(errors.New("handler: could not clean mongo db:"), err)
+	if err := configs.FlushValkey(); err != nil {
+		return fmt.Errorf("handler: could not flush valkey cache: %w", err)
 	}
 
 	userSettings, err := repos.GetUserSettings()
@@ -36,7 +37,7 @@ func RunScheduledNotifications(ctx *telegohandler.Context, update telego.Update)
 		if len(sales) > 0 {
 			var fullMessage string
 			for _, sale := range sales {
-				message := fmt.Sprintf("<a href=\"%s\"><b>%s</b></a>\n%s %s <s>%s</s>\n", sale.Url, sale.Name, sale.FinalPrice, sale.Discount, sale.InitialPrice)
+				message := fmt.Sprintf("<a href=\"%s\"><b>%s</b></a> (%s %s <s>%s</s>)\n", sale.Url, sale.Name, sale.Discount, sale.FinalPrice, sale.InitialPrice)
 				fullMessage = fullMessage + message
 			}
 
@@ -93,22 +94,6 @@ func getMissingSteamAppsIds(parsedSteamAppsIds []uint64, existingSteamAppsDetail
 	return idsToRequest, nil
 }
 
-func runCleanup() error {
-	if err := repos.DropWishlists(); err != nil {
-		return errors.Join(errors.New("could not drop wishlists:"), err)
-	}
-
-	if err := repos.DropIgdbGames(); err != nil {
-		return errors.Join(errors.New("could not drop igdb games:"), err)
-	}
-
-	if err := repos.DropSteamAppsDetails(); err != nil {
-		return errors.Join(errors.New("could not drop steam apps details:"), err)
-	}
-
-	return nil
-}
-
 func obtainIgdbGames(slugs []string) ([]igdb.Game, error) {
 	existingGames, err := repos.GetIgdbGames(slugs)
 	if err != nil {
@@ -155,7 +140,7 @@ func extractSteamAppsIdsFromExternalIgdbGames(igdbGames []igdb.Game) ([]uint64, 
 }
 
 func obtainSteamAppsDetails(steamAppsIds []uint64, userSettings models.UserSettings) ([]steam.AppDetails, error) {
-	existingSteamAppsDetails, err := repos.GetSteamAppsDetails(steamAppsIds)
+	existingSteamAppsDetails, err := repos.GetSteamAppsDetails(steamAppsIds, userSettings.CountryCode)
 	if err != nil {
 		return nil, errors.Join(errors.New("could not check for existing steam record:"), err)
 	}
@@ -172,12 +157,12 @@ func obtainSteamAppsDetails(steamAppsIds []uint64, userSettings models.UserSetti
 			return nil, errors.Join(errors.New("could not get apps details from steam:"), err)
 		}
 
-		if err = repos.InsertSteamAppsDetails(appsDetails); err != nil {
+		if err = repos.InsertSteamAppsDetails(appsDetails, userSettings.CountryCode); err != nil {
 			return nil, errors.Join(errors.New("could not insert apps details from steam:"), err)
 		}
 	}
 
-	appsDetails, err := repos.GetSteamAppsDetails(steamAppsIds)
+	appsDetails, err := repos.GetSteamAppsDetails(steamAppsIds, userSettings.CountryCode)
 	if err != nil {
 		return nil, errors.Join(errors.New("could not get app details from mongo db:"), err)
 	}
@@ -186,22 +171,13 @@ func obtainSteamAppsDetails(steamAppsIds []uint64, userSettings models.UserSetti
 }
 
 func processWishlist(userSettings models.UserSettings) ([]models.Sale, error) {
-	slugs, err := parsers.ParseBackloggdWishlist(userSettings.BackloggdProfile)
+	slugs, err := parsers.ParseBackloggdWishlistPlaywright(userSettings.BackloggdProfile)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("could not parse profile: %s", userSettings.BackloggdProfile), err)
 	}
 
 	if len(slugs) == 0 {
 		return []models.Sale{}, nil
-	}
-
-	wishlist := models.Wishlist{
-		UserId:   userSettings.UserId,
-		SlugList: slugs,
-	}
-
-	if err = repos.InsertWishlists([]models.Wishlist{wishlist}); err != nil {
-		return nil, errors.Join(fmt.Errorf("could not insert wishlists: %s", userSettings.BackloggdProfile), err)
 	}
 
 	igdbGames, err := obtainIgdbGames(slugs)

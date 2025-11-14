@@ -1,48 +1,48 @@
 package repos
 
 import (
-	"context"
-	"errors"
+	"encoding/json"
+	"fmt"
 
 	"github.com/theverysameliquidsnake/sales-bot/internal/configs"
 	"github.com/theverysameliquidsnake/sales-bot/internal/models/igdb"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 func GetIgdbGames(slugs []string) ([]igdb.Game, error) {
-	filter := bson.M{"slug": bson.M{"$in": slugs}}
+	var games []igdb.Game
+	for _, slug := range slugs {
+		gameJson, err := configs.GetValkeyValue("igdb:" + slug)
+		if err != nil {
+			return nil, fmt.Errorf("repository: could not query igdb game: %w", err)
+		}
 
-	cursor, err := getIgdbGamesCollection().Find(context.Background(), filter)
-	if err != nil {
-		return nil, errors.Join(errors.New("repository: could not query igdb games:"), err)
+		if len(gameJson) == 0 {
+			continue
+		}
+
+		var game igdb.Game
+		err = json.Unmarshal([]byte(gameJson), &game)
+		if err != nil {
+			return nil, fmt.Errorf("repository: could not map igdb game: %w", err)
+		}
+
+		games = append(games, game)
 	}
-	defer cursor.Close(context.Background())
 
-	var results []igdb.Game
-	if err = cursor.All(context.Background(), &results); err != nil {
-		return nil, errors.Join(errors.New("repository: could not map igdb games:"), err)
-	}
-
-	return results, nil
+	return games, nil
 }
 
 func InsertIgdbGames(games []igdb.Game) error {
-	if _, err := getIgdbGamesCollection().InsertMany(context.Background(), games); err != nil {
-		return errors.Join(errors.New("repository: could not insert igdb games:"), err)
+	for _, game := range games {
+		gameJson, err := json.Marshal(game)
+		if err != nil {
+			return fmt.Errorf("repository: could not marshal igdb game: %w", err)
+		}
+
+		if err = configs.SetValkeyValue("igdb:"+game.Slug, string(gameJson)); err != nil {
+			return fmt.Errorf("repository: could not insert igdb game: %w", err)
+		}
 	}
 
 	return nil
-}
-
-func DropIgdbGames() error {
-	if err := getIgdbGamesCollection().Drop(context.Background()); err != nil {
-		return errors.Join(errors.New("repository: could not delete igdb games collection:"), err)
-	}
-
-	return nil
-}
-
-func getIgdbGamesCollection() *mongo.Collection {
-	return configs.GetMongoDatabase().Collection("igdb_games")
 }

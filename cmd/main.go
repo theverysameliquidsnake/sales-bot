@@ -19,12 +19,33 @@ func init() {
 }
 
 func main() {
-	// Make initial required connections and calls
-	if err := configs.ConnectToMongo(); err != nil {
+	// Postres
+	if err := configs.ConnectToPostgres(); err != nil {
 		log.Fatal(err)
 	}
-	defer configs.DisconnectFromMongo()
+	defer configs.DisconnectFromPostgres()
 
+	if err := configs.PingPostgres(); err != nil {
+		log.Fatal(err)
+	}
+
+	// Valkey
+	if err := configs.CreateValkeyClient(); err != nil {
+		log.Fatal(err)
+	}
+	defer configs.DestroyValkeyClient()
+
+	// Playwright
+	if err := configs.InstallPlaywright(); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := configs.StartPlaywright(); err != nil {
+		log.Fatal(err)
+	}
+	defer configs.StopPlaywright()
+
+	// IGDB token
 	if err := configs.RequestIgdbToken(); err != nil {
 		log.Fatal(err)
 	}
@@ -49,8 +70,6 @@ func main() {
 	botHandler.Handle(handlers.StartHandler, telegohandler.CommandEqual("start"))
 	botHandler.Handle(handlers.ProfileHandler, telegohandler.CommandEqual("profile"))
 	botHandler.Handle(handlers.CountryHandler, telegohandler.CommandEqual("country"))
-
-	// Debug command
 	botHandler.Handle(handlers.RefreshHandler, telegohandler.CommandEqual("refresh"))
 
 	if err = botHandler.Start(); err != nil {
